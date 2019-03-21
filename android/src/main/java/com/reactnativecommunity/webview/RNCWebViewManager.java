@@ -558,6 +558,7 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
   protected static class RNCWebViewClient extends WebViewClient {
 
     protected boolean mLastLoadFailed = false;
+    protected boolean mDidRetryReloadAfterAccessDeniedError = false;
     protected @Nullable
     ReadableArray mUrlPrefixesForDefaultIntent;
 
@@ -578,6 +579,7 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
     public void onPageStarted(WebView webView, String url, Bitmap favicon) {
       super.onPageStarted(webView, url, favicon);
       mLastLoadFailed = false;
+      mDidRetryReloadAfterAccessDeniedError = false;
 
       dispatchEvent(
         webView,
@@ -613,6 +615,12 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
       super.onReceivedError(webView, errorCode, description, failingUrl);
       mLastLoadFailed = true;
 
+      if(shouldRetryAfterAccessDeniedError(description, failingUrl))
+      {
+        webView.reload();
+        return;
+      }
+
       // In case of an error JS side expect to get a finish event first, and then get an error event
       // Android WebView does it in the opposite way, so we need to simulate that behavior
       emitFinishEvent(webView, failingUrl);
@@ -645,6 +653,21 @@ public class RNCWebViewManager extends SimpleViewManager<WebView> {
       event.putBoolean("canGoBack", webView.canGoBack());
       event.putBoolean("canGoForward", webView.canGoForward());
       return event;
+    }
+
+    protected boolean shouldRetryAfterAccessDeniedError(String error, String url)
+    {
+      boolean isErrAccessDenied = error.equals("net::ERR_ACCESS_DENIED");
+      boolean isFileRequest = url.startsWith("file:");
+
+      // When the webview triggers a 'net::ERR_ACCESS_DENIED' error and the url is a local file, retry once.
+      if(!mDidRetryReloadAfterAccessDeniedError && isErrAccessDenied && isFileRequest)
+      {
+        mDidRetryReloadAfterAccessDeniedError = true;
+        return true;
+      }
+
+      return false;
     }
 
     public void setUrlPrefixesForDefaultIntent(ReadableArray specialUrls) {
